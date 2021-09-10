@@ -9,7 +9,7 @@ After updating, run pegjs -o rockstar-parser.js rockstar.peg
 
   const keywords = new Set([
     // common variable prefixes
-    'a', 'an', 'the', 'my', 'your',
+    'a', 'an', 'the', 'my', 'your', 'our', 'his', 'her', 'their',
 
     // pronouns
     'it', 'he', 'she', 'him', 'her', 'they', 'them', 'ze', 'hir', 'zie', 'zir', 'xe', 'xem', 've', 'ver',
@@ -67,6 +67,14 @@ After updating, run pegjs -o rockstar-parser.js rockstar.peg
   function isKeyword(string) {
     return keywords.has(string.toLowerCase());
   }
+
+  let functionReturnLine = -1
+  let crementLine = -1
+
+  function debugPos() {
+    let loc = location()
+    return "line " + loc.start.line + " cols " + loc.start.column + "-" + loc.end.column
+  }
 }
 
 program = p:line * { return { list: p.filter(item => item) } }
@@ -118,11 +126,14 @@ function_call = name:variable _ 'taking'i _ args:expression_list
 
 expression_list = head:simple_expression expression_list_separator tail:expression_list
 	{ return [head].concat(tail) }
-  / arg:simple_expression { return [arg] }
+  / arg:simple_expression { /*console.log("ACCEPTED simple_expression on 129:", arg);*/ return [arg] }
 
 return = 'return'i / 'give back'i / 'send'i / 'give'i
 
-function_return = return _ e:expression (_ 'back'i)?
+function_return =
+  return _
+  &{ functionReturnLine = location().start.line; return true }
+  e:expression (_ 'back'i)?
 	{ return { 'return': { 'expression' : e } } }
 
 operation = readline / output / crement / mutation / assignment / rounding
@@ -274,24 +285,34 @@ comparator 	= is greater _ 'than'i     _ { return 'gt' }
 
 
 arithmetic         = first:product rest:((add / subtract) product)+
-                { return rest.reduce(function(memo, curr) {
+                { /*console.log("ARITHMETIC starts with", first);*/ return rest.reduce(function(memo, curr) {
+                      //console.log("ACCEPTED arithmetic op:", curr[0], memo, curr[1]);
                       return { binary: { op: curr[0], lhs: memo, rhs: curr[1]} };
                 }, first); }
             / product
 
 product     = first:simple_expression rest:((multiply / divide) expression_list)+
-                { return rest.reduce(function(memo, curr) {
+                { /*console.log("PRODUCT starts with", first);*/ return rest.reduce(function(memo, curr) {
+                    //console.log("ACCEPTED product op:", curr[0]);
                     return { binary: { op: curr[0], lhs: memo, rhs: curr[1]} };
                 }, first); }
-			/ expression_list
-            / simple_expression
+			/ expression_list // { /*console.log("product expression_list:", list); return list;}
+            / simple_expression // { /*console.log("product simple_expression"); return expr;}
 
 // Note that operator aliases explicitly include a trailing space,
 // otherwise 'with' is a prefix code for 'without' and confuses the parser.
+/*
 add 		= _* ('+' / 'plus ' / 'with ') _*       { return '+' }
 subtract 	= _* ('-' / 'minus ' / 'without ') _*   { return '-' }
 multiply 	= _* ('*' / 'times ' / 'of ') _*        { return '*' }
 divide 		= _* ('/' / 'over ' / 'between ') _*    { return '/' }
+*/
+
+add      = (_* '+' _* / _ ('plus'i / 'with'i) _)     { /*console.log("ACCEPTED add at", debugPos());*/ return '+' }
+subtract = (_* '-' _* / _ ('minus'i / 'without'i) _) { /*console.log("ACCEPTED sub at", debugPos());*/ return '-' }
+multiply = (_* '*' _* / _ ('times'i / 'of'i) _)      { /*console.log("ACCEPTED mul at", debugPos());*/ return '*' }
+divide   = (_* '/' _* / _ ('over'i / 'between'i) _)  { /*console.log("ACCEPTED div at", debugPos());*/ return '/' }
+
 
 compoundable_operator = add / subtract / multiply / divide
 
@@ -299,10 +320,22 @@ pronoun = pronoun:(
     'they'i / 'them'i
     / 'she'i / 'him'i / 'her'i / 'hir'i / 'zie'i / 'zir'i / 'xem'i / 'ver'i
     / 'ze'i / 've'i / 'xe'i / 'it'i / 'he'i
-    ) &(is / _ / EOL / EOF)
-    { return { pronoun: pronoun.toLowerCase() } }
+    ) &(is / noise / EOL / EOF)
+    { // console.log("ACCEPTED pronoun at", debugPos())
+      return { pronoun: pronoun.toLowerCase() } }
 
-common_prefix = ( 'an'i / 'a'i / 'the'i / 'my'i / 'your'i)
+common_prefix =
+  ( // sort in reverse to make sure substrings follow larger strings
+      'your'i
+    / 'their'i
+    / 'the'i
+    / 'our'i
+    / 'my'i
+    / 'his'i
+    / 'her'i
+    / 'an'i
+    / 'a'i
+   )
 
 uppercase_letter = [A-ZÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞĀĂĄĆĈĊČĎĐĒĔĖĘĚĜĞĠĢĤĦĨĪĬĮİĲĴĶĸĹĻĽĿŁŃŅŇŊŌŎŐŒŔŖŘŚŜŞŠŢŤŦŨŪŬŮŰŲŴŶŸŹŻŽ]
 lowercase_letter = [a-zàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþāăąćĉċčďđēĕėęěĝğġģĥħĩīĭįıĳĵķĸĺļľŀłńņňŋōŏőœŕŗřśŝşšţťŧũūŭůűųŵŷÿźżžŉß]
@@ -310,7 +343,75 @@ lowercase_letter = [a-zàáâãäåæçèéêëìíîïðñòóôõöøùúûü�
 letter = uppercase_letter / lowercase_letter
 
 common_variable = prefix:common_prefix _ name:$(letter+)
-        { return (prefix + '_' + name).toLowerCase() };
+  (
+    &(_* [-+*/])
+  / &(EOL / EOF)
+    &{
+        // give prefix back -> prefix
+        if (name.toLowerCase() === "back" && functionReturnLine == location().start.line) {
+          return false
+        }
+
+        // build X up / knock X down -> X
+        if (["up", "down"].includes(name.toLowerCase()) && crementLine == location().start.line) {
+          return false
+        }
+
+        return true
+     }
+  / &(
+        (_* ',' / "'s"i / "'re") _
+      / _ (
+           // sort in reverse to make sure substrings follow larger strings
+             "without"i
+           / "with"i
+           / "werent"i
+           / "weren't"i
+           / "were"i
+           / "wasnt"i
+           / "wasn't"i
+           / "was"i
+           / "times"i
+           / "taking"i
+           / "takes"i
+           / "says"i
+           / "plus"i
+           / "over"i
+           / "or"i
+           / "of"i
+           / "not"i
+           / "nor"i
+           / "minus"i
+           / "like"i
+           / "isnt"i
+           / "isn't"i
+           / "is"i
+           / "into"i
+           / "in"i
+           / "between"i
+           / "be"i
+           / "at"i
+           / "arent"i
+           / "aren't"i
+           / "are"i
+           / "and"i
+           / "aint"i
+           / "ain't"i
+           ) _
+      / _ ('back'i / 'down'i / 'up'i / 'round'i / 'around'i) &(noise / EOL / EOF)
+    )
+    &{
+        // console.log("bottom", prefix, name, location().start.line)
+        // build X up / knock X down -> X
+        if (["up", "down"].includes(name.toLowerCase()) && crementLine == location().start.line) {
+          return false
+        }
+
+        return true
+    }
+  )
+  { //console.log("ACCEPTED commonVar", prefix + '_' + name, "at", debugPos()) ;
+    return (prefix + '_' + name).toLowerCase() };
 
 is = ("'s"i / "'re"i / _ ('=' / 'is'i / 'was'i / 'are'i / 'were'i)) _
 
@@ -419,7 +520,7 @@ proper_variable = head:$(proper_noun (' ' $proper_noun)*)
 
 crement = increment / decrement
 
-increment = 'build'i _ v:variable _ t:('up'i noise*)+
+increment = 'build'i _ &{ crementLine = location().start.line; return true } v:variable _ t:('up'i noise*)+
   { return {
       increment: {
           variable: v,
@@ -427,7 +528,7 @@ increment = 'build'i _ v:variable _ t:('up'i noise*)+
         }
     }; }
 
-decrement = 'knock'i _ v:variable _ t:('down'i noise*)+
+decrement = 'knock'i _ &{ crementLine = location().start.line; return true } v:variable _ t:('down'i noise*)+
   { return {
       decrement: {
           variable: v,
